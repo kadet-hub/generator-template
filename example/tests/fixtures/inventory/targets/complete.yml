@@ -1,0 +1,27 @@
+# Every option of the generator, so the gate compiles and checks all of them.
+classes: []
+
+parameters:
+  kapitan:
+    vars:
+      target: complete
+    compile:
+      - input_type: kadet
+        input_paths:
+          - lib/example
+        output_path: manifests/
+
+  namespace: ignored-when-set-below
+  generators:
+    example:
+      namespace: platform
+      configmaps:
+        settings:
+          labels:
+            team: platform
+          data:
+            LOG_LEVEL: info
+            REPLICAS: 3
+        feature-flags:
+          data:
+            NEW_UI: "true"

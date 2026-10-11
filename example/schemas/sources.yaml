@@ -1,0 +1,7 @@
+# QA-7: the output is validated against these schemas; the catalog shows
+# "Built for" from this file. One entry per API group directory.
+core:
+  software: Kubernetes
+  version: "1.35"
+  source: https://github.com/yannh/kubernetes-json-schema/tree/5f1fa4f7908afc9b6641c62d282a4a22437626e1/v1.35.0-standalone-strict
+  license: Apache-2.0

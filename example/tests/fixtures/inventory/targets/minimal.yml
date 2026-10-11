@@ -1,0 +1,20 @@
+# The gate compiles every target here; "minimal" is required (QA-4).
+classes: []
+
+parameters:
+  kapitan:
+    vars:
+      target: minimal
+    compile:
+      - input_type: kadet
+        input_paths:
+          - lib/example
+        output_path: manifests/
+
+  namespace: demo
+  generators:
+    example:
+      configmaps:
+        settings:
+          data:
+            LOG_LEVEL: info

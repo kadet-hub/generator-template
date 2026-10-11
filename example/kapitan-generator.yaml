@@ -1,0 +1,14 @@
+name: example                    # becomes ghcr.io/kadet-hub/<name>; must equal the directory name in lib/
+description: Renders one ConfigMap per entry under parameters.generators.example.
+tags: [kubernetes]               # https://kadet-hub.org/tags/ ; kubernetes needs manifests in the output
+license: Apache-2.0              # must match LICENSE at the repository root
+owners: [1]                      # your GitHub user ID: gh api users/<login> --jq .id
+kapitan: ">=0.36.3,<0.37"
+dependencies: []
+binaries: []                     # every program the generator starts, e.g. "helm template"
+output_capabilities: []          # privileged, host-path, ... if the output needs them
+unparsed_outputs: []
+charts: []
+inventory_backends: [reclass-rs, omegaconf]
+fixtures: tests/fixtures
+schemas: schemas
