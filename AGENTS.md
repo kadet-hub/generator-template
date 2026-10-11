@@ -67,7 +67,9 @@ LICENSE                    at the repository root, must match `license`
   (a pinned upstream URL) and `license`. Take core schemas from
   [kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema)
   `vX.Y.Z-standalone-strict`, CRD schemas from the operator's CRDs at a
-  release tag. Never invent a schema.
+  release tag. Never invent a schema. Schemas are versioned with the
+  generator: when you change the code for a newer upstream release, replace
+  the schemas and bump `version` in `sources.yaml` in the same commit.
 - **Code quality**: `ruff check` with the marketplace's rules (syntax
   errors and pyflakes); `# noqa` is ignored. No symlinks, no executable
   files, no file above 1 MiB, no `.gitattributes`.
