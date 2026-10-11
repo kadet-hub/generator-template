@@ -70,6 +70,16 @@ LICENSE                    at the repository root, must match `license`
   release tag. Never invent a schema. Schemas are versioned with the
   generator: when you change the code for a newer upstream release, replace
   the schemas and bump `version` in `sources.yaml` in the same commit.
+- **Terraform schemas**: a generator that renders `*.tf.json` pins each
+  provider with an exact version in `required_providers` and ships that
+  version's schema: run `terraform providers schema -json > full.json` in
+  the compiled output after `terraform init -backend=false`, reduce it with
+  `python3 sandbox/tf_schema.py extract --full full.json --out compiled/`
+  from a kadet-hub/registry checkout into
+  `schemas/terraform/<namespace>_<type>_<version>.json`, and add
+  `terraform/<namespace>/<type>` to `sources.yaml`. Regenerate it whenever
+  the pin changes. Also run `terraform validate` on the compiled output
+  yourself; the gate checks arguments and types, not provider-side rules.
 - **Code quality**: `ruff check` with the marketplace's rules (syntax
   errors and pyflakes); `# noqa` is ignored. No symlinks, no executable
   files, no file above 1 MiB, no `.gitattributes`.
