@@ -12,10 +12,15 @@ Start a [Kapitan](https://kapitan.dev/) generator that can be listed on
    `README.md`, and fixture targets under `tests/fixtures`. Put the JSON
    Schemas of the resources it emits under `schemas/` with their source in
    `schemas/sources.yaml`.
-4. Run `./check <name>`. It runs the marketplace's ruff rules, compiles the
+4. Run `./check <name>` on Linux x86-64 with docker, uv and yq. It runs the
+   gate's static scan (tree and import checks, gitleaks, semgrep, ruff,
+   GuardDog, ClamAV) with the scanner versions the gate pins, compiles the
    fixtures in the sandbox image without network, and checks tags and
-   schemas, as the gate does (without gVisor and the secret, malware and
-   code scans, which the gate adds).
+   schemas, as the gate does. Only the gate judges the gVisor syscall trace
+   and applies exceptions. ClamAV runs as in the gate, because the gate's
+   scan script runs it unconditionally: the first run pulls the clamav image
+   (about 390 MB), and each run updates its signatures or warns and scans
+   with the shipped ones.
 5. Add the version to `CHANGELOG.md`, tag the commit `<name>-v0.1.0`, push,
    and open the entry pull request described in
    [Adding a generator](https://github.com/kadet-hub/registry/blob/main/docs/authors.md).
