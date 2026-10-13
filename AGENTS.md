@@ -22,6 +22,10 @@ A directory with `__init__.py` defining `main(input_params=None)` that
 returns a `kapitan.inputs.kadet.BaseObj`. Kapitan writes every key of
 `obj.root` as one output file; a `/` in the key creates a directory. The
 generator reads its settings from `inventory().parameters.generators.<name>`.
+Call `inventory()` while compiling, not at import time in a submodule:
+Kapitan re-runs only `__init__.py` per target and keeps submodules cached in
+the worker, so an inventory bound there serves the first target's values to
+later ones.
 
 ## Layout (rename `example` everywhere)
 
