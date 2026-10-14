@@ -74,6 +74,13 @@ LICENSE                    at the repository root, must match `license`
   release tag. Never invent a schema. Schemas are versioned with the
   generator: when you change the code for a newer upstream release, replace
   the schemas and bump `version` in `sources.yaml` in the same commit.
+- **CRDs**: for every custom resource kind you emit whose operator ships a
+  CRD, put that CRD at `schemas/<group>/crds/<plural>.yaml`, one CRD per
+  file, named after `spec.names.plural`: the upstream file byte for byte
+  when it holds only that CRD and is at most 1 MiB, otherwise
+  `<plural>.json` as compact JSON. The group's `sources.yaml` entry covers
+  it. The gate dry-runs every custom resource against it on a kube-apiserver
+  (QA-11, QA-12); kinds without a CRD only get a review line.
 - **Terraform schemas**: a generator that renders `*.tf.json` pins each
   provider with an exact version in `required_providers` and ships that
   version's schema: run `terraform providers schema -json > full.json` in
