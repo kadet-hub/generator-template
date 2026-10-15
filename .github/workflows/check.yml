@@ -25,3 +25,50 @@ jobs:
           for manifest in */kapitan-generator.yaml; do
             ./check "$(dirname "$manifest")"
           done
+
+  # ./scaffold end to end on real CRDs: a namespaced kind from a release asset
+  # with several CRDs and a cluster-scoped one above 1 MiB. Only here, not in
+  # repositories made from the template.
+  scaffold:
+    if: github.repository == 'kadet-hub/generator-template'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: false
+      - name: Refusals
+        run: |
+          refuse() {
+            local want=$1 out
+            shift
+            if out=$("$@" 2>&1); then echo "accepted: $*"; exit 1; fi
+            grep -qF -- "$want" <<<"$out" || { echo "$out"; exit 1; }
+          }
+          kyverno=https://github.com/kyverno/kyverno/blob/v1.19.1/config/crds/kyverno/kyverno.io_clusterpolicies.yaml
+          refuse "example exists" ./scaffold example "$kyverno" </dev/null
+          refuse "holds no CustomResourceDefinition" ./scaffold demo https://github.com/kyverno/kyverno/blob/v1.19.1/config/e2e/rbac.yaml </dev/null
+          refuse "not pinned to a release tag" ./scaffold demo "${kyverno/v1.19.1/main}" </dev/null
+          refuse "is a Helm template" ./scaffold demo https://github.com/cert-manager/cert-manager/blob/v1.18.6/deploy/crds/crd-certificates.yaml </dev/null
+          refuse "tags: at most" ./scaffold demo "$kyverno" < <(printf '%s\n' Kyverno Apache-2.0 Apache-2.0 'kubernetes bogus')
+          test ! -e demo
+      - name: Scaffold and check
+        run: |
+          printf '%s\n' Certificate cert-manager Apache-2.0 Kyverno Apache-2.0 Apache-2.0 'kubernetes operators' | ./scaffold scaffolded \
+            https://github.com/cert-manager/cert-manager/releases/download/v1.18.6/cert-manager.crds.yaml \
+            https://raw.githubusercontent.com/kyverno/kyverno/refs/tags/v1.19.1/config/crds/kyverno/kyverno.io_clusterpolicies.yaml
+          ./check scaffolded
+      - name: tools/upstream.py of kadet-hub/generators reproduces the schemas
+        run: |
+          commit=$(grep -oE '[0-9a-f]{40}' scaffold | head -1)
+          curl -fsSLo "$RUNNER_TEMP/upstream.py" "https://raw.githubusercontent.com/kadet-hub/generators/$commit/tools/upstream.py"
+          PYTHONPATH=$RUNNER_TEMP uv run --with pyyaml==6.0.3 python3 -c '
+          import sys
+          from pathlib import Path
+          import upstream
+          url = "https://github.com/kyverno/kyverno/blob/v1.19.1/config/crds/kyverno/kyverno.io_clusterpolicies.yaml"
+          sys.exit(upstream.gate(Path("scaffolded/schemas/kyverno.io"), [url], [url])[1])'

@@ -25,6 +25,19 @@ Start a [Kapitan](https://kapitan.dev/) generator that can be listed on
    and open the entry pull request described in
    [Adding a generator](https://github.com/kadet-hub/registry/blob/main/docs/authors.md).
 
+For a generator of an operator's custom resources, `./scaffold <name>
+<crd-url>...` does step 1 and starts step 3. Each URL is a CRD file at a
+release tag: a GitHub blob or raw URL, or any https URL with the tag in its
+path, such as a release asset. It creates `<name>/` like `example/`: the
+JSON Schemas and CRD files under `schemas/`, written as `tools/upstream.py`
+in kadet-hub/generators writes them, a generator that renders one resource
+per inventory entry with its `spec` passed through, and a `minimal` fixture
+whose required fields take the CRD's defaults or first enum values, or
+placeholders that it lists. It asks for each API group's software and
+licence, the generator's licence and tags, and the kinds to take from a file
+with several CRDs. It needs uv and network, and reads
+`example/kapitan-generator.yaml`, so keep `example/` until you have run it.
+
 Working with a coding agent: point it at [AGENTS.md](AGENTS.md).
 
 Before you start, read [when a generator is worth
