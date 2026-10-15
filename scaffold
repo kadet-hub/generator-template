@@ -1,0 +1,334 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pyyaml==6.0.3"]
+# ///
+"""Scaffold a generator that renders custom resources of upstream CRDs.
+
+Usage: ./scaffold <name> <crd-url>...
+
+Each URL points to a YAML file with CustomResourceDefinitions at a release
+tag: a GitHub blob or raw URL, or any https URL with the tag in its path.
+Creates <name>/ like example/, with the CRDs' JSON Schemas and CRD files
+under schemas/ and a fixture target "minimal" with one resource per kind.
+Asks for each API group's software and licence, the generator's licence and
+tags, and the kinds to take from a file that holds several CRDs.
+"""
+
+import copy
+import json
+import re
+import sys
+import textwrap
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import yaml
+
+MANIFEST_SCHEMA = "https://raw.githubusercontent.com/kadet-hub/registry/main/policy/manifest.schema.json"
+BLOB = re.compile(r"https://github\.com/([^/]+/[^/]+)/blob/([^/]+)/(.+)")
+RAW = re.compile(r"https://raw\.githubusercontent\.com/([^/]+/[^/]+)/(?:refs/tags/)?([^/]+)/(.+)")
+VERSION = re.compile(r"\D*(\d+(?:\.\d+)+)")
+
+# Loader and close are copied from tools/upstream.py in kadet-hub/generators
+# at f70e66681b07fa797aae8b91786d1ba1a47e54bf. The CRD file choice and render
+# below repeat its crd_schemas and render, so its weekly upstream update
+# reproduces the files written here byte for byte.
+
+
+class Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    """Safe loader that reads a plain = (YAML 1.1 value key, as in matcher enums) as a string."""
+
+
+Loader.add_constructor("tag:yaml.org,2002:value", Loader.construct_yaml_str)
+
+
+def close(schema):
+    """additionalProperties: false on every node with properties, like kubeconform strict mode."""
+    if not isinstance(schema, dict):
+        return
+    if "properties" in schema and "additionalProperties" not in schema and not schema.get("x-kubernetes-preserve-unknown-fields"):
+        schema["additionalProperties"] = False
+    for sub in [*schema.get("properties", {}).values(), *schema.get("definitions", {}).values()]:
+        close(sub)
+    close(schema.get("items"))
+    close(schema.get("additionalProperties"))
+
+
+def render(schema):
+    """The JSON Schema file for one openAPIV3Schema, in upstream key order with indent 2, which upstream.py's render keeps."""
+    props = schema.setdefault("properties", {})
+    for key, sub in (("apiVersion", {"type": "string"}), ("kind", {"type": "string"}), ("metadata", {"type": "object"})):
+        props.setdefault(key, sub)
+    close(schema)
+    return json.dumps(schema, indent=2) + "\n"
+
+
+def fetch(url):
+    if not url.startswith("https://"):
+        sys.exit(f"{url}: not an https URL")
+    if m := BLOB.fullmatch(url):
+        url = f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{m[3]}"
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:
+            return response.read()
+    except (urllib.error.URLError, TimeoutError) as e:
+        sys.exit(f"{url}: {e}")
+
+
+def source(url):
+    """(sources.yaml source, version) of a URL; GitHub raw URLs become blob URLs, which upstream.py updates."""
+    if m := BLOB.fullmatch(url) or RAW.fullmatch(url):
+        url, refs = f"https://github.com/{m[1]}/blob/{m[2]}/{m[3]}", [m[2]]
+    else:
+        refs = url.split("/")[3:-1]
+    if v := next((m for r in refs if (m := VERSION.fullmatch(r))), None):
+        return url, v[1]
+    sys.exit(f"{url}: not pinned to a release tag")
+
+
+def ask(question, default=None):
+    """The answer on stdin, default if it is empty; exits without one."""
+    try:
+        answer = input(f"{question}: ").strip()
+    except EOFError:
+        answer = ""
+    if not answer and default is None:
+        sys.exit(f"no answer to: {question}")
+    return answer or default
+
+
+def fill(schema, path, placeholders):
+    """A value for a required field: its default, its first enum value, its required fields or a typed placeholder."""
+    if "default" in schema:
+        return copy.deepcopy(schema["default"])
+    if schema.get("enum"):
+        return copy.deepcopy(schema["enum"][0])
+    if schema.get("type") == "object" or "properties" in schema:
+        props = schema.get("properties", {})
+        return {k: fill(props[k], f"{path}.{k}", placeholders) for k in schema.get("required", []) if k in props}
+    if schema.get("type") == "array" and schema.get("minItems"):
+        return [fill(schema.get("items", {}), f"{path}[0]", placeholders)]
+    value = [] if schema.get("type") == "array" else {"integer": 1, "number": 1, "boolean": False}.get(schema.get("type"), "placeholder")
+    placeholders.append(f"{path}: {json.dumps(value)}")
+    return value
+
+
+def snake(kind):
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", kind)).lower()
+
+
+INIT = '''"""__NAME__ generator: one custom resource per entry under parameters.generators.__NAME__.<kind>.
+
+Scaffolded from the CRDs in schemas/; each entry's spec is passed through as
+written. Add the defaults, derived values and related resources that make
+the generator worth using. Keep to the import allowlist of the kadet-hub gate
+(policy/imports.txt in kadet-hub/registry).
+"""
+
+import re
+
+from kapitan.inputs.kadet import BaseObj, inventory
+
+# Inventory key: (apiVersion, kind, namespaced)
+KINDS = {
+__KINDS__}
+
+
+def main(input_params=None):
+    params = inventory().parameters
+    config = params.get("generators", {}).get("__NAME__", {})
+    namespace = config.get("namespace", params.get("namespace", "default"))
+    out = BaseObj()
+    for key, (api_version, kind, namespaced) in KINDS.items():
+        for name in sorted(config.get(key, {})):
+            entry = config[key][name]
+            if len(name) > 63 or not re.fullmatch(r"(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?", name):
+                raise ValueError(
+                    f"{kind} '{name}': the name is also the value of the 'app.kubernetes.io/name'"
+                    " label, and a label value must be at most 63 characters (this one has"
+                    f" {len(name)}) of letters, digits, '-', '_' or '.', starting and ending with a"
+                    " letter or digit; use a shorter name"
+                )
+            labels = {"app.kubernetes.io/name": name, "app.kubernetes.io/managed-by": "kapitan"}
+            labels.update({str(k): str(v) for k, v in entry.get("labels", {}).items()})
+            metadata = {"name": name, "labels": labels}
+            if namespaced:
+                metadata["namespace"] = namespace
+            resource = {"apiVersion": api_version, "kind": kind, "metadata": metadata}
+            if "spec" in entry:
+                resource["spec"] = entry["spec"]
+            out.root[f"{namespace}/{name}-{kind.lower()}" if namespaced else f"{name}-{kind.lower()}"] = resource
+    return out
+'''
+
+README = """# __NAME__
+
+Renders __KINDS__ resources from `parameters.generators.__NAME__`. Replace this text
+with what your generator adds and why someone would use it; the kadet-hub
+catalog shows this README on the generator's page.
+
+## Usage
+
+```yaml
+parameters:
+  kapitan:
+    dependencies:
+      - type: oci
+        source: ghcr.io/kadet-hub/__NAME__@sha256:<digest>
+        output_path: lib/__NAME__
+    compile:
+      - input_type: kadet
+        input_paths:
+          - lib/__NAME__
+        output_path: manifests/
+  generators:
+    __NAME__:
+__ENTRIES__```
+
+## Output
+
+| Input | Kind | File |
+|---|---|---|
+__ROWS__
+Every resource carries `app.kubernetes.io/name` and
+`app.kubernetes.io/managed-by: kapitan`; `labels` adds to them. `spec` is
+passed through as written.
+"""
+
+MINIMAL = """# The gate compiles every target here; "minimal" is required (QA-4).
+classes: []
+
+parameters:
+  kapitan:
+    vars:
+      target: minimal
+    compile:
+      - input_type: kadet
+        input_paths:
+          - lib/__NAME__
+        output_path: manifests/
+
+  namespace: demo
+  generators:
+    __NAME__:
+__ENTRIES__"""
+
+SOURCES = """# QA-7: the output is validated against these schemas; the catalog shows
+# "Built for" from this file. One entry per API group directory. ./scaffold
+# took the JSON Schemas from the CRDs' openAPIV3Schema at source, closed like
+# kubeconform strict mode: every node with properties gets
+# additionalProperties: false, except preserve-unknown-fields nodes, maps and
+# allOf/anyOf/oneOf/not branches. A CRD file is the upstream file, or
+# crds/<plural>.json with the CRD as compact JSON when the upstream file holds
+# other documents or exceeds 1 MiB.
+"""
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    name, urls = sys.argv[1], sys.argv[2:]
+    gen = Path(name)
+    if gen.exists():
+        sys.exit(f"{name} exists")
+    example = Path(__file__).resolve().parent / "example" / "kapitan-generator.yaml"
+    if not example.is_file():
+        sys.exit(f"{example} is missing; the manifest starts from it")
+    manifest = example.read_text()
+    manifest_schema = json.loads(fetch(MANIFEST_SCHEMA))["properties"]
+    if not re.fullmatch(manifest_schema["name"]["pattern"], name):
+        sys.exit(f"{name}: a generator name matches {manifest_schema['name']['pattern']}")
+
+    files, kinds, groups, placeholders = {}, {}, {}, []
+    for url in urls:
+        src, version = source(url)
+        raw = fetch(url)
+        try:
+            docs = [d for d in yaml.load_all(raw, Loader=Loader) if d is not None]
+        except yaml.YAMLError as e:
+            sys.exit(f"{url}: not YAML: {e}")
+        crds = [d for d in docs if isinstance(d, dict) and d.get("kind") == "CustomResourceDefinition" and d.get("spec", {}).get("versions")]
+        if not crds:
+            sys.exit(f"{url}: holds no CustomResourceDefinition")
+        if len(crds) > 1:
+            held = [d["spec"]["names"]["kind"] for d in crds]
+            chosen = ask(f"{url} holds {' '.join(held)}; kinds to render, empty for all", "").split() or held
+            if unknown := set(chosen) - set(held):
+                sys.exit(f"{url}: holds no CRD of {' '.join(sorted(unknown))}")
+            crds = [d for d in crds if d["spec"]["names"]["kind"] in chosen]
+        for doc in crds:
+            spec = doc["spec"]
+            group, kind, plural = spec["group"], spec["names"]["kind"], spec["names"]["plural"]
+            served = [v for v in spec["versions"] if v.get("served") and "openAPIV3Schema" in v.get("schema", {})]
+            if not served:
+                sys.exit(f"{url}: {kind} has no served version with an openAPIV3Schema")
+            if "{{" in str(doc.get("metadata")):
+                sys.exit(f"{url}: the {kind} CRD is a Helm template; use a rendered one, such as a release asset")
+            if snake(kind) in kinds:
+                sys.exit(f"{url}: a second CRD of kind {kind}")
+            if len(docs) == 1 and len(raw) <= 1 << 20:
+                files[f"schemas/{group}/crds/{plural}.yaml"] = raw
+            else:
+                files[f"schemas/{group}/crds/{plural}.json"] = json.dumps(doc, separators=(",", ":")) + "\n"
+            for v in served:
+                files[f"schemas/{group}/{kind.lower()}_{v['name']}.json"] = render(copy.deepcopy(v["schema"]["openAPIV3Schema"]))
+            emitted = next((v for v in served if v.get("storage")), served[0])
+            props = emitted["schema"]["openAPIV3Schema"].get("properties", {})
+            entry = {"spec": fill(props["spec"], f"{kind} spec", placeholders)} if "spec" in props else {}
+            kinds[snake(kind)] = (f"{group}/{emitted['name']}", kind, spec["scope"] == "Namespaced", entry)
+            groups.setdefault(group, {}).setdefault(src, version)
+
+    sources = SOURCES
+    for group, srcs in sorted(groups.items()):
+        versions = list(srcs.values())
+        entry = {
+            "software": ask(f"software of {group}"),
+            "version": versions[0] if len(set(versions)) == 1 else " / ".join(versions),
+            "source": " ".join(srcs),
+            "license": ask(f"licence of the {group} CRDs (SPDX)"),
+        }
+        sources += yaml.safe_dump({group: entry}, sort_keys=False, width=1 << 16)
+    licence = ask("licence of the generator (SPDX, as LICENSE at the repository root)")
+    enum = manifest_schema["tags"]["items"]["enum"]
+    tags = ask(f"tags, space separated, from: {' '.join(enum)}", "").split()
+    if len(set(tags)) != len(tags) or len(tags) > manifest_schema["tags"]["maxItems"] or not set(tags) <= set(enum):
+        sys.exit(f"tags: at most {manifest_schema['tags']['maxItems']} distinct of {' '.join(enum)}")
+
+    namespaced = any(n for _, _, n, _ in kinds.values())
+    listed = ", ".join(kind for _, kind, _, _ in kinds.values())
+    entries = {key: {"example": e} for key, (_, _, _, e) in kinds.items()}
+    examples = {key: {"example": {"labels": {"team": "platform"}, **e}} for key, (_, _, _, e) in kinds.items()}
+    ns = '      namespace: demo            # default: parameters.namespace, then "default"\n' if namespaced else ""
+    rows = "".join(
+        f"| `{key}.<name>` | {kind} `{api}` | `{'<namespace>/' if n else ''}<name>-{kind.lower()}.yaml` |\n"
+        for key, (api, kind, n, _) in kinds.items()
+    )
+    description = f"Renders {listed} resources from parameters.generators.{name}."
+    for key, value in (("name", name), ("description", description), ("tags", f"[{', '.join(tags)}]"), ("license", licence)):
+        manifest = re.sub(rf"(?m)^{key}: \S.*?(?=\s+#|$)", lambda _: f"{key}: {value}", manifest)
+    table = "".join(f'    "{key}": ("{api}", "{kind}", {n}),\n' for key, (api, kind, n, _) in kinds.items())
+    files |= {
+        "__init__.py": INIT.replace("__NAME__", name).replace("__KINDS__", table),
+        "kapitan-generator.yaml": manifest,
+        "README.md": README.replace("__NAME__", name).replace("__KINDS__", listed).replace("__ROWS__", rows)
+        .replace("__ENTRIES__", ns + textwrap.indent(yaml.safe_dump(examples, sort_keys=False), " " * 6)),
+        "CHANGELOG.md": "# Changelog\n\n## 0.1.0\n\nFirst version.\n",
+        "schemas/sources.yaml": sources,
+        "tests/fixtures/inventory/targets/minimal.yml": MINIMAL.replace("__NAME__", name)
+        .replace("__ENTRIES__", textwrap.indent(yaml.safe_dump(entries, sort_keys=False), " " * 6)),
+        "tests/fixtures/inventory/classes/.gitkeep": "",
+    }
+    for path, content in files.items():
+        (gen / path).parent.mkdir(parents=True, exist_ok=True)
+        (gen / path).write_bytes(content if isinstance(content, bytes) else content.encode())
+    print(f"created {name}/")
+    if placeholders:
+        print("placeholders for required fields in README.md and tests/fixtures, replace them:")
+        print("".join(f"  {p}\n" for p in placeholders), end="")
+    print(f"next: set owners in {name}/kapitan-generator.yaml, then ./check {name}")
+
+
+if __name__ == "__main__":
+    main()

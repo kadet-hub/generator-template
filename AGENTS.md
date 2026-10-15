@@ -42,6 +42,12 @@ later ones.
 LICENSE                    at the repository root, must match `license`
 ```
 
+For an operator's custom resources, start with `./scaffold <name>
+<crd-url>...` instead of renaming `example`; the URLs are the CRD files at a
+release tag. It writes this layout with the schemas, the CRD files and a
+`minimal` fixture. Replace the placeholders it prints, then add what the
+generator is for (see "Decide first").
+
 ## Hard rules (the gate fails otherwise)
 
 - **Imports**: only the allowlist in

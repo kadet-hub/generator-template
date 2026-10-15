@@ -3,6 +3,11 @@
   "extends": [
     "config:recommended"
   ],
+  "pep723": {
+    "managerFilePatterns": [
+      "/^scaffold$/"
+    ]
+  },
   "packageRules": [
     {
       "description": "Runners stay on ubuntu-24.04, the runner the registry gate's tooling that ./check runs is tested on",
