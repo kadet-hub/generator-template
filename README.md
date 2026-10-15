@@ -26,7 +26,7 @@ Start a [Kapitan](https://kapitan.dev/) generator that can be listed on
    [Adding a generator](https://github.com/kadet-hub/registry/blob/main/docs/authors.md).
 
 For a generator of an operator's custom resources, `./scaffold <name>
-<crd-url>...` takes the place of steps 1 and 3. Each URL is a CRD file at a
+<crd-url>...` does step 1 and starts step 3. Each URL is a CRD file at a
 release tag: a GitHub blob or raw URL, or any https URL with the tag in its
 path, such as a release asset. It creates `<name>/` like `example/`: the
 JSON Schemas and CRD files under `schemas/`, written as `tools/upstream.py`
