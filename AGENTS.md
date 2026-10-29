@@ -40,6 +40,7 @@ later ones.
     inventory/classes/
   schemas/                 JSON Schemas of emitted kinds + sources.yaml
 LICENSE                    at the repository root, must match `license`
+SECURITY.md                at the repository root, keep it as it is
 ```
 
 For an operator's custom resources, start with `./scaffold <name>
@@ -116,3 +117,5 @@ generator is for (see "Decide first").
    (`generators/<name>.yaml` with repo, path, tag, sha and owners). Prepare
    its content, but leave opening it to the owner, who accepts the
    [terms of listing](https://github.com/kadet-hub/registry/blob/main/TERMS.md).
+   Remind the owner that registration needs private vulnerability
+   reporting turned on in the generator's repository (README, step 2).

@@ -7,7 +7,10 @@ Start a [Kapitan](https://kapitan.dev/) generator that can be listed on
    files. The name becomes `ghcr.io/kadet-hub/<name>`.
 2. Set `owners` in `kapitan-generator.yaml` to your GitHub user ID
    (`gh api users/<login> --jq .id`), and `tags` from the
-   [tag list](https://kadet-hub.org/tags/).
+   [tag list](https://kadet-hub.org/tags/). Turn on private vulnerability
+   reporting with `gh api -X PUT repos/<owner>/<repo>/private-vulnerability-reporting`:
+   [SECURITY.md](SECURITY.md) sends reports there, and a repository made
+   from a template does not inherit the setting.
 3. Write the generator in `__init__.py`, an inventory example in its
    `README.md`, and fixture targets under `tests/fixtures`. Put the JSON
    Schemas of the resources it emits under `schemas/` with their source in
